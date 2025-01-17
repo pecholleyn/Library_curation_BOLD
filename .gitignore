@@ -1,5 +1,12 @@
+.snakemake
 resources/BOLD_Public.*.tsv
 results/bold.db
 .idea
 .DS_Store
 *.tsv.gz
+.Rhistory
+.Rproj.user/
+*.Rproj
+criteria/
+logs/
+results/
