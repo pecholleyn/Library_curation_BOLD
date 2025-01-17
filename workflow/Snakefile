@@ -2,14 +2,9 @@
 import os
 
 # Read configuration file
-configfile: "config/config.yml"
+configfile: "../config/config.yml"
 
-indexes_file = config["INDEXES"]
-perl_lib = config["LIBS"]
 
-rule all:
-    input:
-        "results/result_output.tsv"
 
 # Rule for creating the database and loading BCDM
 rule create_load_db:
@@ -17,393 +12,365 @@ rule create_load_db:
         bold_tsv=config["BOLD_TSV"],
         schema=config["SCHEMA"]
     output:
-        f"results/{config['DB_FILE']}"
+        touch(config["DB_FILE"])
     shell:
-        "perl workflow/scripts/load_bcdm.pl --tsv {input.bold_tsv} --db {output} --sql {input.schema} --log INFO --force"
+        "perl scripts/load_bcdm.pl --tsv {input.bold_tsv} --db {output} --sql {input.schema} --log INFO --force"
 
-
+# Rule for applying indexes to the database
+rule apply_indexes:
+    input:
+        indexes=config["INDEXES"],
+        db=config["DB_FILE"],
+        taxonomy= "../results/taxonomy_loaded.txt"
+    output:
+        touch(config["DB_FILE_INDEXED"])
+    shell:
+        """
+        sqlite3 {input.db} < {input.indexes} && touch {output}
+        """
 # Rule for producing the object-relational mapping
 rule produce_orm:
     output:
-        directory(perl_lib)
+        directory="../lib"
     shell:
         """
-        dbicdump -o dump_directory={output} BCDM::ORM 'dbi:SQLite:dbname={config[DB_FILE]}'
+        dbicdump -o dump_directory=../lib BCDM::ORM 'dbi:SQLite:dbname={config["DB_FILE"]}'
         """
 
 # Rule for loading taxonomy into the database
 rule load_taxonomy:
     input:
-        perl_lib=rules.produce_orm.output,
-        db=rules.create_load_db.output
+        db=config["DB_FILE"]
     output:
-        "results/taxonomy_loaded.txt"
+        touch("../results/taxonomy_loaded.txt")
     shell:
         """
-        perl -I{input.perl_lib} workflow/scripts/load_taxonomy.pl --db {input.db} --log INFO &&
-        touch {output}
-        """
-
-# Rule for applying indexes to the database
-rule apply_indexes:
-    input:
-        indexes=indexes_file,
-        db=rules.create_load_db.output,
-        taxonomy="results/taxonomy_loaded.txt"
-    output:
-        config["DB_FILE_INDEXED"]  # FIXME ???
-    shell:
-        """
-        sqlite3 {input.db} < {config[INDEXES]} && touch {output}
+        perl -I../lib scripts/load_taxonomy.pl --db {input.db} --log INFO
         """
 
 # Rule for importing the target list and mapping to taxonomy
 rule import_target_list_perl:
     input:
-        targetlist=config["TARGET_LIST"],
-        db=rules.create_load_db.output
+        perl_script="scripts/load_targetlist.pl",
+        targetlist="../resources/all_specs_and_syn.csv",
+        db="../results/bold.db"
     output:
         target="target_loaded.txt"
     shell:
         """
-        perl workflow/scripts/load_targetlist.pl \\
+        perl {input.perl_script} \\
             --list {input.targetlist} \\
             --db {input.db} \\
             --log KINGDOM \\
             --project {config[PROJECT_NAME]} \\
             --taxon {config[TAXON_LEVEL]} \\
-            --kingdom {config[KINGDOM]}
+            --kingdom {config[KINGDOM]} 
         """
 
 # Rules for assessing criteria
 # COLLECTION_DATE
 rule COLLECTION_DATE:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_COLLECTION_DATE.tsv",
-    log:
-        "logs/assessed_COLLECTION_DATE.log"
+        tsv="../results/assessed_COLLECTION_DATE.tsv",
+        log="../results/assessed_COLLECTION_DATE.log"
     shell:
         """
-        perl -I{perl_lib} workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria COLLECTION_DATE \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
 
 # COLLECTORS
 rule COLLECTORS:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_COLLECTORS.tsv",
-    log:
-        "logs/assessed_COLLECTORS.log"
+        tsv="../results/assessed_COLLECTORS.tsv",
+        log="../results/assessed_COLLECTORS.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria COLLECTORS \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
 
 # COORD
 rule COORD:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_COORD.tsv",
-    log:
-        "logs/assessed_COORD.log"
+        tsv="../results/assessed_COORD.tsv",
+        log="../results/assessed_COORD.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria COORD \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 # COUNTRY
 rule COUNTRY:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_COUNTRY.tsv",
-    log:
-        "logs/assessed_COUNTRY.log"
+        tsv="../results/assessed_COUNTRY.tsv",
+        log="../results/assessed_COUNTRY.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria COUNTRY \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 # HAS_IMAGE  
 rule HAS_IMAGE:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_HAS_IMAGE.tsv",
-    log:
-        "logs/assessed_HAS_IMAGE.log"
+        tsv="../results/assessed_HAS_IMAGE.tsv",
+        log="../results/assessed_HAS_IMAGE.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria HAS_IMAGE \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
 
-# IDENTIFIER
+# IDENTIFIER  
 rule IDENTIFIER:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_IDENTIFIER.tsv",
-    log:
-        "logs/assessed_IDENTIFIER.log"
+        tsv="../results/assessed_IDENTIFIER.tsv",
+        log="../results/assessed_IDENTIFIER.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria IDENTIFIER \\
-            2> {log} > {output.tsv}
-        """
-
-# ID_METHOD
+            2> {output.log} > {output.tsv}
+        """     
+# ID_METHOD  
 rule ID_METHOD:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_ID_METHOD.tsv",
-    log:
-        "logs/assessed_ID_METHOD.log"
+        tsv="../results/assessed_ID_METHOD.tsv",
+        log="../results/assessed_ID_METHOD.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria ID_METHOD \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
-# INSTITUTION
+# INSTITUTION  
 rule INSTITUTION:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_INSTITUTION.tsv",
-    log:
-        "logs/assessed_INSTITUTION.log"
+        tsv="../results/assessed_INSTITUTION.tsv",
+        log="../results/assessed_INSTITUTION.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria INSTITUTION \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
-# MUSEUM_ID
+# MUSEUM_ID  
 rule MUSEUM_ID:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_MUSEUM_ID.tsv",
-    log:
-        "logs/assessed_MUSEUM_ID.log"
+        tsv="../results/assessed_MUSEUM_ID.tsv",
+        log="../results/assessed_MUSEUM_ID.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria INSTITUTION \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 # PUBLIC_VOUCHER
 rule PUBLIC_VOUCHER:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_PUBLIC_VOUCHER.tsv",
-    log:
-        "logs/assessed_PUBLIC_VOUCHER.log"
+        tsv="../results/assessed_PUBLIC_VOUCHER.tsv",
+        log="../results/assessed_PUBLIC_VOUCHER.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria PUBLIC_VOUCHER \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 # SEQ_QUALITY
 rule SEQ_QUALITY:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_SEQ_QUALITY.tsv",
-    log:
-        "logs/assessed_SEQ_QUALITY.log"
+        tsv="../results/assessed_SEQ_QUALITY.tsv",
+        log="../results/assessed_SEQ_QUALITY.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria SEQ_QUALITY \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
-# SITE
+# SITE 
 rule SITE:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_SITE.tsv",
-    log:
-        "logs/assessed_SITE.log"
+        tsv="../results/assessed_SITE.tsv",
+        log="../results/assessed_SITE.log"
     shell:
         """
-        perl -I../lib workflow/scripts/assess_criteria.pl \\
+        perl -I../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria SITE \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 #SPECIES_ID
 rule SPECIES_ID:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_SPECIES_ID.tsv",
-    log:
-        "logs/assessed_SPECIES_ID.log"
+        tsv="../results/assessed_SPECIES_ID.tsv",
+        log="../results/assessed_SPECIES_ID.log"
     shell:
         """
-        perl -I ../lib workflow/scripts/assess_criteria.pl \\
+        perl -I ../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria SPECIES_ID \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
 # TYPE_SPECIMEN
 rule TYPE_SPECIMEN:
     input:
-        db=rules.create_load_db.output,
-        flag=rules.apply_indexes.output
+        script="scripts/assess_criteria.pl",
+        db="../results/bold.db",
+        flag= config["DB_FILE_INDEXED"]
     output:
-        tsv="results/assessed_TYPE_SPECIMEN.tsv",
-    log:
-        "logs/assessed_TYPE_SPECIMEN.log"
+        tsv="../results/assessed_TYPE_SPECIMEN.tsv",
+        log="../results/assessed_TYPE_SPECIMEN.log"
     shell:
         """
-        perl -I ../lib workflow/scripts/assess_criteria.pl \\
+        perl -I ../lib {input.script} \\
             --db {input.db} \\
             --log INFO \\
             --criteria TYPE_SPECIMEN \\
-            2> {log} > {output.tsv}
+            2> {output.log} > {output.tsv}
         """
-
-rule concatenate:
+rule concatinate:
     input:
-        db=rules.create_load_db.output,
-        collectors= rules.COLLECTORS.output.tsv,
-        date= rules.COLLECTION_DATE.output.tsv,
-        coord= rules.COORD.output.tsv,
-        country= rules.COUNTRY.output.tsv,
-        image= rules.HAS_IMAGE.output.tsv,
-        identifier= rules.IDENTIFIER.output.tsv,
-        method= rules.ID_METHOD.output.tsv,
-        institurion= rules.INSTITUTION.output.tsv,
-        museums_id= rules.MUSEUM_ID.output.tsv,
-        voucher= rules.PUBLIC_VOUCHER.output.tsv,
-        quality= rules.SEQ_QUALITY.output.tsv,
-        site= rules.SITE.output.tsv,
-        spec_id= rules.SPECIES_ID.output.tsv,
-        type= rules.TYPE_SPECIMEN.output.tsv,
-        taxonomy= rules.load_taxonomy.output,
+        concat="scripts/concat_tsvs.pl",
+        db="../results/bold.db",
+        collectors= rules.COLLECTORS.output.tsv ,
+        date= rules.COLLECTION_DATE.output.tsv ,
+        coord= rules.COORD.output.tsv , 
+        country= rules.COUNTRY.output.tsv , 
+        image= rules.HAS_IMAGE.output.tsv , 
+        identifier= rules.IDENTIFIER.output.tsv , 
+        method= rules.ID_METHOD.output.tsv , 
+        institurion= rules.INSTITUTION.output.tsv , 
+        museums_id= rules.MUSEUM_ID.output.tsv , 
+        voucher= rules.PUBLIC_VOUCHER.output.tsv ,
+        quality= rules.SEQ_QUALITY.output.tsv , 
+        site= rules.SITE.output.tsv , 
+        spec_id= rules.SPECIES_ID.output.tsv ,
+        type= rules.TYPE_SPECIMEN.output.tsv ,
+        taxonomy= rules.load_taxonomy.output ,
     output:
-        temp("CONCATENATED.tsv")
+        concat= "CONCATENATED.tsv"
     shell:
         """
-        perl workflow/scripts/concat_tsvs.pl \\
-         results/assessed_SPECIES_ID.tsv \\
-         results/assessed_TYPE_SPECIMEN.tsv \\
-         results/assessed_SEQ_QUALITY.tsv \\
-         results/assessed_PUBLIC_VOUCHER.tsv \\
-         results/assessed_HAS_IMAGE.tsv \\
-         results/assessed_IDENTIFIER.tsv \\
-         results/assessed_ID_METHOD.tsv \\
-         results/assessed_COLLECTION_DATE.tsv \\
-         results/assessed_COLLECTION_DATE.tsv \\
-         results/assessed_COUNTRY.tsv \\
-         results/assessed_SITE.tsv \\
-         results/assessed_COORD.tsv \\
-         results/assessed_INSTITUTION.tsv \\
-         results/assessed_MUSEUM_ID.tsv > {output}
+        perl  {input.concat} ../results/assessed_SPECIES_ID.tsv ../results/assessed_TYPE_SPECIMEN.tsv ../results/assessed_SEQ_QUALITY.tsv ../results/assessed_PUBLIC_VOUCHER.tsv ../results/assessed_HAS_IMAGE.tsv ../results/assessed_IDENTIFIER.tsv ../results/assessed_ID_METHOD.tsv ../results/assessed_COLLECTION_DATE.tsv ../results/assessed_COLLECTION_DATE.tsv ../results/assessed_COUNTRY.tsv ../results/assessed_SITE.tsv ../results/assessed_COORD.tsv ../results/assessed_INSTITUTION.tsv ../results/assessed_MUSEUM_ID.tsv > CONCATENATED.tsv
 
-sqlite3 {input.db} <<EOF
+sqlite3 ../results/bold.db <<EOF
 .mode tabs
-.import {output}
-.quit
-EOF
-        """
-
-# Rule for outputting filtered data in BCDM
+.import CONCATENATED.tsv
+.quit   
+EOF    
+        """    
+# Rule for outputting filtered data in BCDM        
 rule output_filtered_data:
     input:
-        pivot_query="workflow/scripts/pivot.sql",
-        db=rules.create_load_db.output,
-        concat=rules.concatenate.output,
+        pivot_query="scripts/pivot.sql",
+        db="../results/bold.db",
+        concat="CONCATENATED.tsv",
         indexed=config["DB_FILE_INDEXED"],
-        collectors= rules.COLLECTORS.output.tsv,
-        date= rules.COLLECTION_DATE.output.tsv,
-        coord= rules.COORD.output.tsv,
-        country= rules.COUNTRY.output.tsv,
-        image= rules.HAS_IMAGE.output.tsv,
-        identifier= rules.IDENTIFIER.output.tsv,
-        method= rules.ID_METHOD.output.tsv,
-        institurion= rules.INSTITUTION.output.tsv,
-        museums_id= rules.MUSEUM_ID.output.tsv,
-        voucher= rules.PUBLIC_VOUCHER.output.tsv,
-        quality= rules.SEQ_QUALITY.output.tsv,
-        site= rules.SITE.output.tsv,
-        spec_id= rules.SPECIES_ID.output.tsv,
-        type= rules.TYPE_SPECIMEN.output.tsv,
-        taxonomy= rules.load_taxonomy.output,
+        collectors= rules.COLLECTORS.output.tsv ,
+        date= rules.COLLECTION_DATE.output.tsv ,
+        coord= rules.COORD.output.tsv , 
+        country= rules.COUNTRY.output.tsv , 
+        image= rules.HAS_IMAGE.output.tsv , 
+        identifier= rules.IDENTIFIER.output.tsv , 
+        method= rules.ID_METHOD.output.tsv , 
+        institurion= rules.INSTITUTION.output.tsv , 
+        museums_id= rules.MUSEUM_ID.output.tsv , 
+        voucher= rules.PUBLIC_VOUCHER.output.tsv ,
+        quality= rules.SEQ_QUALITY.output.tsv , 
+        site= rules.SITE.output.tsv , 
+        spec_id= rules.SPECIES_ID.output.tsv ,
+        type= rules.TYPE_SPECIMEN.output.tsv ,
+        taxonomy= rules.load_taxonomy.output ,
     output:
-        "results/result_output.tsv"
+        "../results/result_output.tsv"
     shell:
         """
-        sqlite3 {input.db} <<EOF
-.headers ON
+        sqlite3 ../results/bold.db <<EOF
+.headers ON        
 .mode tabs
-.output {output}
-.read {input.pivot_query}
+.output ../results/result_output.tsv
+.read scripts/pivot.sql
 .quit
 EOF
         """

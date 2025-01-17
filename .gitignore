@@ -1,7 +1,5 @@
 resources/BOLD_Public.*.tsv
-results/
+results/bold.db
 .idea
 .DS_Store
 *.tsv.gz
-.snakemake/
-logs/
